@@ -72,18 +72,20 @@ func main() {
 		log.Fatal(err)
 	}
 
+	//initialize app
 	app := fiber.New()
 
+	//get all employees
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.SendString("Hello, world!!")
 	})
 
-	app.Get("/employee", func(c *fiber.Ctx) error {
+	app.Get("/employees", func(c *fiber.Ctx) error {
 
 		//define query
 		query := bson.D{{}}
 
-		//send back cursor and error
+		//sends back cursor and error
 		cursor, err := mg.Db.Collection("employees").Find(c.Context(), query)
 
 		//handle err
@@ -91,16 +93,53 @@ func main() {
 			return c.Status(500).SendString(err.Error())
 		}
 
-		//creata a slice with struct of type Employee
+		//create a slice with struct of type Employee
 		var employees = make([]Employee, 0)
 
 		//handle error
 		if err := cursor.All(c.Context(), &employees); err != nil {
-			c.Status(500).SendString(err.Error())
+			return c.Status(500).SendString(err.Error())
 		}
 
 		//return employees
 		return c.JSON(employees)
+	})
+
+	app.Post("/employee", func(c *fiber.Ctx) error {
+		//define collection
+		collection := mg.Db.Collection("employees")
+
+		//define var employee of type Employee
+		employee := new(Employee)
+
+		//receive data from user by bodyParser and convert to employee struct
+		if err := c.BodyParser(&employee); err != nil {
+			return c.Status(400).SendString(err.Error())
+		}
+
+		//set initial employee ID as em,pty
+		employee.ID = ""
+
+		//insert the data to mongodb using InsertOne
+		insertionResult, err := collection.InsertOne(c.Context(), employee)
+
+		if err != nil {
+			return c.Status(500).SendString(err.Error())
+		}
+
+		//create a query with key name "_id" and value of insertedID from the insertion result
+		filter := bson.D{{Key: "_id", Value: insertionResult.InsertedID}}
+		//FindOne - find from collection the document with specified query
+		createdRecord := collection.FindOne(c.Context(), filter)
+
+		//create a new var createdEmployee of struct Employee
+		createdEmployee := new(Employee)
+
+		//unmarshal the data and store value in createdEmployee pointer
+		createdRecord.Decode(&createdEmployee)
+
+		//return createdEmployee struct in json format
+		return c.Status(201).JSON(createdEmployee)
 	})
 
 	app.Listen(":8000")
