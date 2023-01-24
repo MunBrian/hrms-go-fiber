@@ -9,6 +9,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -43,6 +44,10 @@ func connectDB() error {
 
 	//create a newclient connection to mongo returns an instance and err
 	client, err := mongo.NewClient(options.Client().ApplyURI(mongoURI))
+
+	if err != nil {
+		return err
+	}
 
 	//define timeout to avoid code blocking if code takes time
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -80,6 +85,7 @@ func main() {
 		return c.SendString("Hello, world!!")
 	})
 
+	//get all employees from db
 	app.Get("/employees", func(c *fiber.Ctx) error {
 
 		//define query
@@ -105,6 +111,7 @@ func main() {
 		return c.JSON(employees)
 	})
 
+	//create employee
 	app.Post("/employee", func(c *fiber.Ctx) error {
 		//define collection
 		collection := mg.Db.Collection("employees")
@@ -140,6 +147,90 @@ func main() {
 
 		//return createdEmployee struct in json format
 		return c.Status(201).JSON(createdEmployee)
+	})
+
+	//update employee's detail
+	app.Put("/employee/:id", func(c *fiber.Ctx) error {
+		//get parameter from url
+		idParam := c.Params("id")
+
+		//covert hexadecimal string(idParam) to a mongoDb ObjectID
+		employeeID, err := primitive.ObjectIDFromHex(idParam)
+
+		//handle error
+		if err != nil {
+			return c.Status(400).SendString(err.Error())
+		}
+
+		//create a var employee of type Employeestruct
+		employee := new(Employee)
+
+		//handle error
+		//get body value from user and point to the struct mployee
+		if err := c.BodyParser(&employee); err != nil {
+			return c.Status(400).SendString(err.Error())
+		}
+
+		//generate a query of key "_id" and value of employeeID
+		query := bson.D{{Key: "_id", Value: employeeID}}
+
+		//set var update with the new values to replace document
+		update := bson.D{
+			{Key: "$set",
+				Value: bson.D{
+					{Key: "name", Value: employee.Name},
+					{Key: "age", Value: employee.Age},
+					{Key: "salary", Value: employee.Salary},
+				},
+			},
+		}
+
+		//find and update mongoDB doc
+		err = mg.Db.Collection("employees").FindOneAndUpdate(c.Context(), query, update).Err()
+
+		//handle error
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				return c.SendStatus(400)
+			}
+
+			return c.SendStatus(500)
+		}
+
+		//set employeeId to the value of id param
+		employee.ID = idParam
+
+		//return struct employee in form of json
+		return c.Status(200).JSON(employee)
+	})
+
+	//delete func
+	app.Delete("/employee/:id", func(c *fiber.Ctx) error {
+		idParam := c.Params("id")
+
+		//covert hexadecimal string(idParam) to a mongoDb ObjectID
+		employeeID, err := primitive.ObjectIDFromHex(idParam)
+
+		if err != nil {
+			return c.Status(400).SendString(err.Error())
+		}
+
+		//query
+		query := bson.D{{Key: "_id", Value: employeeID}}
+
+		result, err := mg.Db.Collection("employees").DeleteOne(c.Context(), query)
+
+		if err != nil {
+			return c.SendStatus(500)
+		}
+
+		//if result was not found
+		if result.DeletedCount < 1 {
+			return c.SendStatus(404)
+		}
+
+		return c.Status(200).SendString("Deleted Successfully!!")
+
 	})
 
 	app.Listen(":8000")
